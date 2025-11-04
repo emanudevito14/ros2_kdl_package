@@ -1,19 +1,49 @@
 #include "kdl_planner.h"
 
-
+/**
+ * @brief [Default constructor].
+ * 
+  */
 KDLPlanner::KDLPlanner(){}
 
+/**
+ * @brief [Planner Constructor if trapezoidal profile].
+ * 
+ * @param [_maxVel] [max vel of trapezoidal velocity profile].
+ * @param [_maxAcc] [max acc of trapezoidal velocity profile].
+ */
 KDLPlanner::KDLPlanner(double _maxVel, double _maxAcc)
 {
     velpref_ = new KDL::VelocityProfile_Trap(_maxVel,_maxAcc);
 }
 
+/**
+ * @brief [Planner Constructor if generic traj].
+ * 
+ * @param [] [].
+ * @param
+ * @param
+ * @param
+ */
 KDLPlanner::KDLPlanner(double _trajDuration, double _accDuration, Eigen::Vector3d _trajInit, Eigen::Vector3d _trajEnd)
 {
     trajDuration_ = _trajDuration;
     accDuration_ = _accDuration;
     trajInit_ = _trajInit;
     trajEnd_ = _trajEnd;
+}
+
+/**
+ * @brief [Planner Constructor for a circular trajectory]
+ * 
+ * @param
+ */
+KDLPlanner::KDLPlanner(double _trajDuration, Eigen::Vector3d _trajInit, double _trajRadius, double _accDuration)
+{
+  trajDuration_ = _trajDuration;
+  accDuration_ = _accDuration;
+  trajInit_ = _trajInit;
+  trajRadius_ = _trajRadius;
 }
 
 void KDLPlanner::CreateTrajectoryFromFrames(std::vector<KDL::Frame> &_frames,
@@ -59,6 +89,15 @@ KDL::Trajectory* KDLPlanner::getTrajectory()
 	return traject_;
 }
 
+/**
+ * @brief [Trapezoidal velocity profile].
+ * 
+ * [Trapezoidal velocity profile with given accDuration_ acceleration
+ *  time period and trajDuration_ total duration that output the pos vel and acc
+ *  at the time t].
+ * 
+ * @param [time] [current time].
+ */
 trajectory_point KDLPlanner::compute_trajectory(double time)
 {
   /* trapezoidal velocity profile with accDuration_ acceleration time period and trajDuration_ total duration.
@@ -93,4 +132,155 @@ trajectory_point KDLPlanner::compute_trajectory(double time)
 
   return traj;
 
+}
+
+////////////////////////////
+// TODO: HW functions     //
+////////////////////////////
+
+/**
+ * @brief [trapezoidal velocity profile function].
+ *
+ * @param [t] [current time at which the curvilinear abscissa is computed].
+ * @param [t_c] [cruise time].
+ * @param [s] [curvilinear abscissa]
+ * @param [s_dot] [Velocity at the current time]
+ * @param [s_ddot] [acceleration at the current time]
+ */
+void KDLPlanner::trapezoidal_vel(double t, double t_c, double &s, double &s_dot, double &s_ddot)
+{
+  // Compute s_ddot_c
+  double s_ddot_c = -1.0 / (std::pow(t_c,2) - trajDuration_*t_c);
+
+  // Compute s, s_dot, s_ddot at current time t
+  if (t <= t_c)
+  {
+    s = 0.5*s_ddot_c*std::pow(t,2);
+    s_dot = s_ddot_c*t;
+    s_ddot = s_ddot_c;
+  }
+  else if (t <= (trajDuration_ - t_c))
+  {
+    s = s_ddot_c*t_c*(t - t_c/2);
+    s_dot = s_ddot_c*t_c;
+    s_ddot = 0;
+  }
+  else
+  {
+    s = 1 - 0.5*s_ddot_c*std::pow(trajDuration_ - t, 2);
+    s_dot = s_ddot_c*(trajDuration_ - t);
+    s_ddot = -s_ddot_c;
+  }
+}
+
+/**
+ * @brief [cubic polynomial function]
+ *
+ * @param [t] [current time at which the curvilinear abscissa is computed].
+ * @param [s] [curvilinear abscissa]
+ * @param [s_dot] [velocity at the current time]
+ * @param [s_ddot] [acceleration at the current time]
+ */
+void KDLPlanner::cubic_polynomial(double t, double &s, double &s_dot, double &s_ddot)
+{
+  // Polynomial coefficient
+  double a_0 = 0;
+  double a_1 = 0;
+  double a_2 = 3 / std::pow(trajDuration_, 2);
+  double a_3 = -2 / std::pow(trajDuration_,3);
+
+  // Cubic profile
+  s = a_3*std::pow(t,3) + a_2*std::pow(t,2) + a_1*t+ a_0;
+  s_dot = 3*a_3*std::pow(t,2) + 2*a_2*t + a_1;
+  s_ddot = 6*a_3*t + 2*a_2;
+}
+
+/**
+ * @brief [circular trajectory function]
+ * 
+ * @param [s] [curvilinear abscissa]
+ * @param [s_dot] [velocity at the current time]
+ * @param [s_ddot] [acceleration at the current time]
+ */
+trajectory_point KDLPlanner::compute_circular_trajectory(double s, double s_dot, double s_ddot)
+{
+  trajectory_point traj;
+
+  // position
+  traj.pos(0) = trajInit_(0);
+  traj.pos(1) = trajInit_(1) - trajRadius_*cos(2*M_PI*s) + trajRadius_;
+  traj.pos(2) = trajInit_(2) - trajRadius_*sin(2*M_PI*s);
+
+  // velocity
+  traj.vel(0) = 0;
+  traj.vel(1) = 2*M_PI*s_dot*trajRadius_*sin(2*M_PI*s);
+  traj.vel(2) = -2*M_PI*s_dot*trajRadius_*cos(2*M_PI*s);
+
+  // acceleration
+  traj.acc(0) = 0;
+  traj.acc(1) = 2*M_PI*trajRadius_*(s_ddot*sin(2*M_PI*s) + 2*M_PI*std::pow(s_dot,2)*cos(2*M_PI*s));
+  traj.acc(2) = 2*M_PI*trajRadius_*(-s_ddot*cos(2*M_PI*s) + 2*M_PI*std::pow(s_dot,2)*sin(2*M_PI*s));
+
+  return traj;
+}
+
+/**
+ * @brief [linear trajectory function]
+ * 
+ * @param [s] [curvilinear abscissa]
+ * @param [s_dot] [velocity at the current time]
+ * @param [s_ddot] [acceleration at the current time]
+ */
+trajectory_point KDLPlanner::compute_linear_trajectory(double s, double s_dot, double s_ddot)
+{
+  trajectory_point traj;
+
+  Eigen::Vector3d delta_p = trajEnd_ - trajInit_;
+
+  // Point to poin interpolation
+  traj.pos = trajInit_ + s*delta_p;
+  traj.vel = s_dot*delta_p;
+  traj.acc = s_ddot*delta_p;
+
+  return traj;
+}
+
+/**
+ * @brief [circular trajectory function with cubic profile]
+ */
+trajectory_point KDLPlanner::circular_traj_cubic(const double t)
+{
+  double s, s_dot, s_ddot;
+  cubic_polynomial(t, s, s_dot, s_ddot);
+  return compute_circular_trajectory(s, s_dot, s_ddot);
+}
+
+/**
+ * @brief [circular trajectory function with trapezoidal proflie]
+ */
+trajectory_point KDLPlanner::circular_traj_trapezoidal(const double t)
+{
+  double s, s_dot, s_ddot;
+  trapezoidal_vel(t, accDuration_, s, s_dot, s_ddot);
+  return compute_circular_trajectory(s, s_dot, s_ddot);
+}
+
+/**
+ * @brief [linear trajectory function with cubic profile]
+ */
+trajectory_point KDLPlanner::linear_traj_cubic(const double t)
+{
+  double s, s_dot, s_ddot;
+  cubic_polynomial(t, s, s_dot, s_ddot);
+  return compute_linear_trajectory(s, s_dot, s_ddot);
+}
+
+/**
+ * @brief [linear trajectory function with trapezoidal profile]
+ */
+trajectory_point KDLPlanner::linear_traj_trapezoidal(const double t)
+{
+  double s, s_dot, s_ddot;
+  trapezoidal_vel(t, accDuration_, s, s_dot, s_ddot);
+  return compute_linear_trajectory(s, s_dot, s_ddot);
 }
