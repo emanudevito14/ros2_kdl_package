@@ -42,6 +42,14 @@ class Iiwa_pub_sub : public rclcpp::Node
             {
                 RCLCPP_ERROR(get_logger(),"Selected cmd interface is not valid! Use 'position', 'velocity' or 'effort' instead..."); return;
             }
+            // declare ctrl parameter (velocity_ctrl, velocity_ctrl_null)
+            declare_parameter("ctrl", "velocity_ctrl"); // default
+            get_parameter("ctrl", ctrl_);
+            RCLCPP_INFO(get_logger(),"Selected velocity controller: '%s'", ctrl_.c_str());
+            if (!(ctrl_ == "velocity_ctrl" || ctrl_ == "velocity_ctrl_null")) {
+                RCLCPP_ERROR(get_logger(),"Invalid ctrl param! Use 'velocity_ctrl' or 'velocity_ctrl_null'");
+                return;
+            }
 
             // declare traj_type parameter (linear, circular)
             declare_parameter("traj_type", "linear");
@@ -59,6 +67,32 @@ class Iiwa_pub_sub : public rclcpp::Node
             if (!(s_type_ == "trapezoidal" || s_type_ == "cubic"))
             {
                 RCLCPP_INFO(get_logger(),"Selected s type is not valid!"); return;
+            }
+            // Declare numeric trajectory parameters
+            declare_parameter("traj_duration", 1.5);
+            declare_parameter("acc_duration", 0.5);
+            declare_parameter("total_time", 1.5);
+            declare_parameter("trajectory_len", 150);
+            declare_parameter("Kp", 5.0);
+
+            // Declare end position parameter as array
+            std::vector<double> end_pos_default = {0.0, 0.0, 0.0};
+            declare_parameter("end_position", end_pos_default);
+
+            // Retrieve parameters from YAML
+            get_parameter("traj_duration", traj_duration_);
+            get_parameter("acc_duration", acc_duration_);
+            get_parameter("total_time", total_time_);
+            get_parameter("trajectory_len", trajectory_len_);
+            get_parameter("Kp", Kp_);
+
+            std::vector<double> end_position_param;
+            get_parameter("end_position", end_position_param);
+            if (end_position_param.size() == 3) {
+                end_position_ << end_position_param[0], end_position_param[1], end_position_param[2];
+            } else {
+                RCLCPP_ERROR(get_logger(), "end_position must contain 3 elements!");
+                end_position_ = Eigen::Vector3d(0,0,0);
             }
 
             iteration_ = 0; t_ = 0;
@@ -122,20 +156,20 @@ class Iiwa_pub_sub : public rclcpp::Node
             // std::cout << q.data <<std::endl;
 
             // Initialize controller
-            KDLController controller_(*robot_);
+            controller_ = std::make_shared<KDLController>(*robot_);
 
             // EE's trajectory initial position (just an offset)
             Eigen::Vector3d init_position(Eigen::Vector3d(init_cart_pose_.p.data) - Eigen::Vector3d(0,0,0.1));
 
             // EE's trajectory end position (just opposite y)
-            Eigen::Vector3d end_position; end_position << init_position[0], -init_position[1], init_position[2];
+            Eigen::Vector3d end_position= end_position_; 
 
             // Plan trajectory
-            double traj_duration = 1.5, acc_duration = 0.5, traj_radius = 0.15;
+            double traj_radius = 0.15;
 
             // Retrieve the first trajectory point
             if(traj_type_ == "linear"){
-                planner_ = KDLPlanner(traj_duration, acc_duration, init_position, end_position); // currently using trapezoidal velocity profile
+                planner_ = KDLPlanner(traj_duration_, acc_duration_, init_position, end_position); // currently using trapezoidal velocity profile
                 if(s_type_ == "trapezoidal")
                 {
                     p_ = planner_.linear_traj_trapezoidal(t_);
@@ -146,7 +180,7 @@ class Iiwa_pub_sub : public rclcpp::Node
             } 
             else if(traj_type_ == "circular")
             {
-                planner_ = KDLPlanner(traj_duration, init_position, traj_radius, acc_duration);
+                planner_ = KDLPlanner(traj_duration_, init_position, traj_radius, acc_duration_);
                 if(s_type_ == "trapezoidal")
                 {
                     p_ = planner_.circular_traj_trapezoidal(t_);
@@ -211,14 +245,19 @@ class Iiwa_pub_sub : public rclcpp::Node
             iteration_ = iteration_ + 1;
 
             // define trajectory
-            double total_time = 1.5; // 
-            int trajectory_len = 150; // 
-            int loop_rate = trajectory_len / total_time;
-            double dt = 1.0 / loop_rate;
-            int Kp = 5;
+             
+            
+            // define trajectory
+            if (trajectory_len_ <= 0) {
+                RCLCPP_WARN(this->get_logger(), "trajectory_len_ non valido, imposto a 1");
+                trajectory_len_ = 1;
+            }
+            double dt = total_time_ / static_cast<double>(trajectory_len_);
+
+           
             t_+=dt;
 
-            if (t_ < total_time){
+            if (t_ < total_time_){
 
                 // Set endpoint twist
                 // double t = iteration_;
@@ -262,19 +301,40 @@ class Iiwa_pub_sub : public rclcpp::Node
 
                 if(cmd_interface_ == "position"){
                     // Next Frame
-                    KDL::Frame nextFrame; nextFrame.M = cartpos.M; nextFrame.p = cartpos.p + (toKDL(p_.vel) + toKDL(Kp*error))*dt; 
+                    KDL::Frame nextFrame; nextFrame.M = cartpos.M; nextFrame.p = cartpos.p + (toKDL(p_.vel) + toKDL(Kp_*error))*dt; 
 
                     // Compute IK
                     joint_positions_cmd_ = joint_positions_;
                     robot_->getInverseKinematics(nextFrame, joint_positions_cmd_);
                 }
-                else if(cmd_interface_ == "velocity"){
-                    // Compute differential IK
-                    Vector6d cartvel; cartvel << p_.vel + Kp*error, o_error;
-                    joint_velocities_cmd_.data = pseudoinverse(robot_->getEEJacobian().data)*cartvel;
+                else if (cmd_interface_ == "velocity")
+                {
+                    RCLCPP_INFO_ONCE(this->get_logger(),
+                     "Velocity control mode active: %s",
+                     ctrl_.c_str());
+                    // Compute differential IK inputs
+                    Vector6d cartvel; 
+                    cartvel << p_.vel + Kp_ * error, o_error;
+
+                    const Eigen::MatrixXd J = robot_->getEEJacobian().data;
+                    const Eigen::VectorXd q = joint_positions_.data;
+
+                    if (ctrl_ == "velocity_ctrl_null")
+                    {
+                        
+                        joint_velocities_cmd_.data =
+                            controller_->velocityCtrlNull(error, J, q);
+                    }
+                    else
+                    {
+                       
+                        joint_velocities_cmd_.data =
+                            pseudoinverse(J) * cartvel;
+                    }
                 }
+
                 else if(cmd_interface_ == "effort"){
-                    joint_efforts_cmd_.data[0] = 0.1*std::sin(2*M_PI*t_/total_time);
+                    joint_efforts_cmd_.data[0] = 0.1*std::sin(2*M_PI*t_/total_time_);
                 }
 
                 // Update KDLrobot structure
@@ -362,6 +422,16 @@ class Iiwa_pub_sub : public rclcpp::Node
                 joint_velocities_.data[i] = sensor_msg.velocity[i];
             }
         }
+
+        double traj_duration_;
+        double acc_duration_;
+        double total_time_;
+        int trajectory_len_;
+        double Kp_;
+        Eigen::Vector3d end_position_;
+        std::string ctrl_;
+        std::shared_ptr<KDLController> controller_;
+
 
         rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr jointSubscriber_;
         rclcpp::Publisher<FloatArray>::SharedPtr cmdPublisher_;

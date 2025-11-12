@@ -8,7 +8,8 @@
   <license>TODO: License declaration</license>
 
   <depend>rclcpp</depend>
-  <depend>orocos_kdl</depend>
+  <depend>liborocos-kdl-dev</depend>
+
   <depend>kdl_parser</depend>
   
   <buildtool_depend>ament_cmake</buildtool_depend>
