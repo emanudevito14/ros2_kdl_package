@@ -1,53 +1,51 @@
 # ros2_kdl_package
 
-## :package: About
 
-This package contains the tutorial code to create and run your ROS2 C++ node using KDL. It is supposed to be used together with the [ros2_iiwa package](https://github.com/RoboticsLab2025/ros2_iiwa) 
+This package is supposed to be used together with the [ros2_iiwa package](https://github.com/RoboticsLab2025/ros2_iiwa) 
 
-## :hammer: Build
-Clone this package in the `src` folder of your ROS 2 workspace. Check for missing dependencies
+
+Clone this package in the `src` folder of your ROS 2 workspace and put [ros2_iiwa package](https://github.com/RoboticsLab2025/ros2_iiwa) in `src`  .
 ```
-rosdep install -i --from-path src --rosdistro humble -y
+git clone https://github.com/emanudevito14/ros2_kdl_package.git
 ```
-Build your new package
+Go in root of your workspace and build
 ```
-colcon build --packages-select ros2_kdl_package
+colcon build 
 ```
 Source the setup files
 ```
 . install/setup.bash
 ```
 
-## :white_check_mark: Usage
-Run the node
-```
-ros2 run ros2_kdl_package ros2_kdl_node
-```
 
-By default the node publishes joint position commands. To use the velocity commands 
-```
-ros2 run ros2_kdl_package ros2_kdl_node --ros-args -p cmd_interface:=velocity
-```
-in this case the robot must be launched with the velocity interface
+Run the node
 ```
 ros2 launch iiwa_bringup iiwa.launch.py command_interface:="velocity" robot_controller:="velocity_controller"
 ```
+Open new terminal and launch
+```
+ros2 launch ros2_kdl_package ros2_kdl.launch.py ctrl:="velocity_ctrl"
 
-To use the effort commands 
 ```
-ros2 run ros2_kdl_package ros2_kdl_node --ros-args -p cmd_interface:=effort
+or 
 ```
-in this case the robot must be launched with the velocity interface
+ros2 launch ros2_kdl_package ros2_kdl.launch.py ctrl:="velocity_ctrl_null"
+
 ```
-ros2 launch iiwa_bringup iiwa.launch.py command_interface:="effort" robot_controller:="effort_controller"
+Open new terminal and compare commanded velocity and joint velocity both controller
+```
+ros2 run ros2_kdl_package compare.py -- --joint=0 
+
+```
+or
+```
+ros2 run ros2_kdl_package compare.py -- --joint=1
+ros2 run ros2_kdl_package compare.py -- --joint=2
+ros2 run ros2_kdl_package compare.py -- --joint=3
+ros2 run ros2_kdl_package compare.py -- --joint=4
+ros2 run ros2_kdl_package compare.py -- --joint=5
+ros2 run ros2_kdl_package compare.py -- --joint=6
+ 
 ```
 
-Other parameters are
-```
-traj_type:=linear|circular, s_type:=trapezoidal|cubic
-```
-For instance, you can execute a cubic polinomial circular trajectory by
-```
-ros2 run ros2_kdl_package ros2_kdl_node --ros-args -p cmd_interface:=velocity -p traj_type:=circular -p s_type:=cubic
-```
 
