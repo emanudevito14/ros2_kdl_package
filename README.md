@@ -5,7 +5,10 @@
 This package  is supposed to be used together with the [ros2_iiwa package](https://github.com/RoboticsLab2025/ros2_iiwa) 
 
 
-Clone this package in the `src` folder of your ROS 2 workspace together ros2_iiwa. 
+Clone this package in the `src` folder of your ROS 2 workspace together ros2_iiwa.
+```
+git clone 
+```
 Build your new package
 ```
 colcon build 
