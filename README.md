@@ -7,7 +7,7 @@ This package  is supposed to be used together with the [ros2_iiwa package](https
 
 Clone this package in the `src` folder of your ROS 2 workspace together ros2_iiwa.
 ```
-git clone 
+git clone -b 1c --single-branch https://github.com/emanudevito14/ros2_kdl_package.git
 ```
 Build your new package
 ```
