@@ -1,0 +1,17 @@
+# Goal
+string s_type
+float64 traj_duration
+float64 acc_duration
+float64 total_time
+int32 trajectory_len
+float64[3] end_pos
+
+---
+# Result
+bool success
+PositionError err_pos_final
+
+---
+# Feedback
+PositionError[] err_pos
+

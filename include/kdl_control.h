@@ -2,6 +2,7 @@
 #define KDLControl
 
 #include "Eigen/Dense"
+#include <Eigen/SVD>
 #include "kdl_robot.h"
 #include "utils.h"
 
@@ -25,10 +26,15 @@ public:
                            double _Kpo,
                            double _Kdp,
                            double _Kdo);
+    Eigen::VectorXd velocityCtrlNull(const Eigen::Vector3d &pos_error,
+                                                const Eigen::MatrixXd &J, 
+                                                const Eigen::VectorXd &q);  
 
 private:
 
     KDLRobot* robot_;
+    double Kp_ = 1.0;     
+    double lambda_ = 0.1; 
 
 };
 

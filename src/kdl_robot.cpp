@@ -34,9 +34,10 @@ KDLRobot::KDLRobot(KDL::Tree &robot_tree)
     ikVelSol_ = new KDL::ChainIkSolverVel_pinv(chain_); //Inverse velocity solver 
 }
 
-void KDLRobot::getInverseKinematics(KDL::Frame &f, KDL::JntArray &q){
+int KDLRobot::getInverseKinematics(KDL::Frame &f, KDL::JntArray &q){
     int ret = ikSol_->CartToJnt(jntArray_,f,q);
-    if(ret != 0) {std::cout << ikSol_->strError(ret) << std::endl;};
+    //if(ret != 0) {std::cout << ikSol_->strError(ret) << std::endl;};
+    return ret;
 }
 
 void KDLRobot::setJntLimits(KDL::JntArray &q_low, KDL::JntArray &q_high)

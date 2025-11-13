@@ -60,7 +60,7 @@ public:
     Eigen::VectorXd getEEJacDotqDot();
 
     // inverse kinematics
-    void getInverseKinematics(KDL::Frame &f, KDL::JntArray &q);                           
+    int getInverseKinematics(KDL::Frame &f, KDL::JntArray &q);                           
 
 private:
 
