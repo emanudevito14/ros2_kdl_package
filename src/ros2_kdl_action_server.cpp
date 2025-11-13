@@ -328,16 +328,8 @@ class KDLActionServer : public rclcpp::Node
             }
             else if (cmd_interface_ == "velocity")
             {
-    
-                // Compute differential IK inputs
-                Vector6d cartvel; 
-                cartvel << p_.vel + Kp_ * error, o_error;
-
-                const Eigen::MatrixXd J = robot_->getEEJacobian().data;
-                const Eigen::VectorXd q = joint_positions_.data;
-
-                joint_velocities_cmd_.data = pseudoinverse(J) * cartvel;
-                    
+               Vector6d cartvel; cartvel << p_.vel + Kp_*error, o_error;
+               joint_velocities_cmd_.data = pseudoinverse(robot_->getEEJacobian().data)*cartvel; 
                 
             }
 
@@ -372,9 +364,36 @@ class KDLActionServer : public rclcpp::Node
             cmd_msg.data = desired_commands_;
             cmdPublisher_->publish(cmd_msg);
 
-             loop_rate.sleep();
+            loop_rate.sleep();
 
         }
+        RCLCPP_INFO_ONCE(this->get_logger(), "Trajectory executed successfully ...");
+                
+        // Send joint velocity commands
+        if(cmd_interface_ == "position"){
+            // Set joint position commands
+            for (long int i = 0; i < joint_positions_.data.size(); ++i) {
+                desired_commands_[i] = joint_positions_cmd_(i);
+            }
+        }
+        else if(cmd_interface_ == "velocity"){
+            // Set joint velocity commands
+            for (long int i = 0; i < joint_velocities_.data.size(); ++i) {
+                desired_commands_[i] = 0.0;
+            }
+        }
+        else if(cmd_interface_ == "effort"){
+            // Set joint effort commands
+            for (long int i = 0; i < joint_efforts_cmd_.data.size(); ++i) {
+                desired_commands_[i] = joint_efforts_cmd_(i);
+            }
+        }
+        
+        // Create msg and publish
+        std_msgs::msg::Float64MultiArray cmd_msg;
+        cmd_msg.data = desired_commands_;
+        cmdPublisher_->publish(cmd_msg);
+       
 
         // Check if goal is done
         if (rclcpp::ok()) {
