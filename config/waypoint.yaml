@@ -1,0 +1,5 @@
+kdl_action_client:
+  ros__parameters:
+    x: 0.4
+    y: 0.1
+    z: 0.9

@@ -19,6 +19,8 @@
 #include "kdl_control.h"
 #include "utils.h"
 
+#include "std_msgs/msg/bool.hpp"
+
 #include "ros2_kdl_package/msg/position_error.hpp"
 
 using namespace std::chrono_literals;
@@ -45,38 +47,15 @@ class KDLActionServer : public rclcpp::Node
             RCLCPP_ERROR(get_logger(),"Selected cmd interface is not valid! Use 'position', 'velocity' or 'effort' instead..."); return;
         }
 
-        // declare traj_type parameter (linear, circular)
-        declare_parameter("traj_type", "linear");
-        get_parameter("traj_type", traj_type_);
-        RCLCPP_INFO(get_logger(),"Current trajectory type is: '%s'", traj_type_.c_str());
-        if (!(traj_type_ == "linear"))
-        {
-            RCLCPP_INFO(get_logger(),"Selected traj type is not linear"); return;
-        }
-
-        // declare s_type parameter (trapezoidal, cubic)
-        declare_parameter("s_type", "trapezoidal");
-        get_parameter("s_type", s_type_);
-        RCLCPP_INFO(get_logger(),"Current s type is: '%s'", s_type_.c_str());
-        if (!(s_type_ == "trapezoidal" || s_type_ == "cubic"))
-        {
-            RCLCPP_INFO(get_logger(),"Selected s type is not valid!"); return;
-        }
-        // Declare numeric trajectory parameters
-        declare_parameter("traj_duration", 1.5);
-        declare_parameter("acc_duration", 0.5);
-        declare_parameter("total_time", 1.5);
-        declare_parameter("trajectory_len", 150);
-        declare_parameter("Kp", 5.0);
-
         // Declare end position parameter as array
-        std::vector<double> end_pos_default = {0.0, 0.0, 0.0};
-        declare_parameter("end_position", end_pos_default);
+        //std::vector<double> end_pos_default = {0.0, 0.0, 0.0};
+        //declare_parameter("end_position", end_pos_default);
 
         // Retrieve parameters from YAML
+        declare_parameter("Kp", 5.0);
         get_parameter("Kp", Kp_);
 
-        iteration_ = 0; t_ = 0;
+        
         joint_state_available_ = false;
         
         auto parameters_client = std::make_shared<rclcpp::SyncParametersClient>(node_handle_, "robot_state_publisher");
@@ -124,13 +103,13 @@ class KDLActionServer : public rclcpp::Node
         robot_->update(toStdVector(joint_positions_.data),toStdVector(joint_velocities_.data));
 
         // Compute EE frame
-       init_cart_pose_ = robot_->getEEFrame();
+       //init_cart_pose_ = robot_->getEEFrame();
         // std::cout << "The initial EE pose is: " << std::endl;  
         // std::cout << init_cart_pose_ <<std::endl;
 
         // Compute IK
-       KDL::JntArray q(nj);
-       robot_->getInverseKinematics(init_cart_pose_, q);
+       //KDL::JntArray q(nj);
+       //robot_->getInverseKinematics(init_cart_pose_, q);
         // std::cout << "The inverse kinematics returned: " <<std::endl; 
         // std::cout << q.data <<std::endl;
 
@@ -181,6 +160,8 @@ class KDLActionServer : public rclcpp::Node
       cmdPublisher_->publish(cmd_msg);
 
       RCLCPP_INFO(this->get_logger(), "Starting trajectory execution ...");
+
+      finish_traj= this->create_publisher<std_msgs::msg::Bool> ("/finish_trajectory",10);
         
         
     }
@@ -255,8 +236,17 @@ class KDLActionServer : public rclcpp::Node
         auto result = std::make_shared<LinearTrajectory::Result>();
         double dt = total_time_ / static_cast<double>(trajectory_len_);
         auto & error_position= feedback->err_pos;
+
+        std_msgs::msg::Bool finish_msg;
+        finish_msg.data = false;
+        finish_traj->publish(finish_msg);
+        t_=0;
+        iteration_ =0;
+        init_cart_pose_ = robot_->getEEFrame();
+        KDL::JntArray q(robot_->getNrJnts());
+        robot_->getInverseKinematics(init_cart_pose_, q);
         // EE's trajectory initial position (just an offset)
-        Eigen::Vector3d init_position(Eigen::Vector3d(init_cart_pose_.p.data) - Eigen::Vector3d(0,0,0.1));
+        Eigen::Vector3d init_position(Eigen::Vector3d(init_cart_pose_.p.data) /*- Eigen::Vector3d(0,0,0.1)*/);
 
         // EE's trajectory end position (just opposite y)
         Eigen::Vector3d end_position= end_position_; 
@@ -265,16 +255,16 @@ class KDLActionServer : public rclcpp::Node
         
 
         // Retrieve the first trajectory point
-        if(traj_type_ == "linear"){
-            planner_ = KDLPlanner(traj_duration_, acc_duration_, init_position, end_position); // currently using trapezoidal velocity profile
-            if(s_type_ == "trapezoidal")
-            {
-                p_ = planner_.linear_traj_trapezoidal(t_);
-            }else if(s_type_ == "cubic")
-            {
-                p_ = planner_.linear_traj_cubic(t_);
-            }
-        } 
+        
+        planner_ = KDLPlanner(traj_duration_, acc_duration_, init_position, end_position); // currently using trapezoidal velocity profile
+        if(s_type_ == "trapezoidal")
+        {
+            p_ = planner_.linear_traj_trapezoidal(t_);
+        }else if(s_type_ == "cubic")
+        {
+            p_ = planner_.linear_traj_cubic(t_);
+        }
+    
 
         t_+=dt;
 
@@ -291,15 +281,15 @@ class KDLActionServer : public rclcpp::Node
 
             iteration_ = iteration_ + 1;
             t_+=dt;
-            if(traj_type_ == "linear"){
-               if(s_type_ == "trapezoidal")
-               {
-                 p_ = planner_.linear_traj_trapezoidal(t_);
-               }else if(s_type_ == "cubic")
-                {
-                  p_ = planner_.linear_traj_cubic(t_);
-                }  
-            }
+            
+            if(s_type_ == "trapezoidal")
+            {
+                p_ = planner_.linear_traj_trapezoidal(t_);
+            }else if(s_type_ == "cubic")
+            {
+                p_ = planner_.linear_traj_cubic(t_);
+            }  
+        
          
          // Compute EE frame
             KDL::Frame cartpos = robot_->getEEFrame();           
@@ -368,7 +358,7 @@ class KDLActionServer : public rclcpp::Node
 
         }
         RCLCPP_INFO_ONCE(this->get_logger(), "Trajectory executed successfully ...");
-                
+        
         // Send joint velocity commands
         if(cmd_interface_ == "position"){
             // Set joint position commands
@@ -395,6 +385,10 @@ class KDLActionServer : public rclcpp::Node
         cmdPublisher_->publish(cmd_msg);
        
 
+        
+        finish_msg.data = true;
+        finish_traj->publish(finish_msg);
+
         // Check if goal is done
         if (rclcpp::ok()) {
          result->success= true;
@@ -420,6 +414,7 @@ class KDLActionServer : public rclcpp::Node
     double Kp_;
     Eigen::Vector3d end_position_;
     ros2_kdl_package::msg::PositionError errpos_f;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr finish_traj;
 
     std::shared_ptr<KDLController> controller_;
 
