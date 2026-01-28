@@ -29,7 +29,8 @@ ros2 run ros2_kdl_package kdl_action_server_node --ros-args -p cmd_interface:=ve
 ```
 Open new terminal and run
 ```
-ros2 run ros2_kdl_package kdl_action_client_node
+ros2 run ros2_kdl_package kdl_action_client_node --ros-args --params-file src/ros2_kdl_package/config/waypoint.yaml
+
 
 ```
 
