@@ -2,7 +2,7 @@
 
 
 
-This package  is supposed to be used together with the [ros2_iiwa package](https://github.com/RoboticsLab2025/ros2_iiwa) and [aruco_ros](https://github.com/pal-robotics/aruco_ros)
+This package  is supposed to be used together with the [ros2_iiwa package](https://github.com/emanudevito14/iiwa_ros2) and [aruco_ros](https://github.com/pal-robotics/aruco_ros)
 Use repository Dockerfile 
 
 Clone this package in the `src` folder of your ROS 2 workspace together ros2_iiwa and aruco_ros.
