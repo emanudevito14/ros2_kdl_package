@@ -2,7 +2,7 @@
 
 
 
-This package  is supposed to be used together with the [ros2_iiwa package](https://github.com/RoboticsLab2025/ros2_iiwa) 
+This package  is supposed to be used together with the [ros2_iiwa package](https://github.com/emanudevito14/iiwa_ros2) 
 
 
 Clone this package in the `src` folder of your ROS 2 workspace together ros2_iiwa.
