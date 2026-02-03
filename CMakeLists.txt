@@ -19,11 +19,13 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(ros_gz_interfaces REQUIRED)
 
 # --- Generate messages for actions ---
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/PositionError.msg"
   "action/LinearTrajectory.action"
+  "action/Vision.action"
   DEPENDENCIES builtin_interfaces geometry_msgs
 )
 ament_export_dependencies(rosidl_default_runtime)
@@ -97,12 +99,21 @@ ament_target_dependencies(ros2_kdl_node_example
   rclcpp
 )
 
+add_executable(aruco_setpose_client src/aruco_setpose_client.cpp)
+target_compile_features(aruco_setpose_client PUBLIC cxx_std_17)
+ament_target_dependencies(aruco_setpose_client
+  rclcpp
+  geometry_msgs
+  ros_gz_interfaces
+)
+
 # --- Install targets ---
 install(TARGETS
   kdl_action_client_node
   kdl_action_server_node
   ros2_kdl_node
   ros2_kdl_node_example
+  aruco_setpose_client
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -28,13 +28,17 @@ public:
                            double _Kdo);
     Eigen::VectorXd velocityCtrlNull(const Eigen::Vector3d &pos_error,
                                                 const Eigen::MatrixXd &J, 
-                                                const Eigen::VectorXd &q);  
+                                                const Eigen::VectorXd &q);
+    Eigen::VectorXd visionCtrl(const Eigen::Vector3d &p_o,
+                               const Eigen::MatrixXd &J_spatial,
+                               const Eigen::Matrix3d &R_base_cam,
+                               const Eigen::VectorXd &q);
 
 private:
 
     KDLRobot* robot_;
     double Kp_ = 1.0;     
-    double lambda_ = 0.1; 
+    double lambda_ = 5; 
 
 };
 

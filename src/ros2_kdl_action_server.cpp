@@ -6,10 +6,13 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "geometry_msgs/msg/vector3.hpp"
+#include "geometry_msgs/msg/point_stamped.hpp"
+#include "geometry_msgs/msg/vector3_stamped.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 
 #include "ros2_kdl_package/action/linear_trajectory.hpp"
+#include "ros2_kdl_package/action/vision.hpp"
 
 #include <kdl_parser/kdl_parser.hpp>
 
@@ -33,6 +36,9 @@ class KDLActionServer : public rclcpp::Node
 
     using LinearTrajectory = ros2_kdl_package::action::LinearTrajectory;
     using GoalHandleLinTraj = rclcpp_action::ServerGoalHandle<LinearTrajectory>;
+    using Vision = ros2_kdl_package::action::Vision;
+    using GoalHandleVision = rclcpp_action::ServerGoalHandle<Vision>;
+
     KDLActionServer(const rclcpp::NodeOptions & options = rclcpp::NodeOptions())
     : Node("kdl_action_server",options),node_handle_(std::shared_ptr<KDLActionServer>(this))
     {
@@ -44,7 +50,16 @@ class KDLActionServer : public rclcpp::Node
      
         if (!(cmd_interface_ == "position" || cmd_interface_ == "velocity" || cmd_interface_ == "effort" ))
         {
-            RCLCPP_ERROR(get_logger(),"Selected cmd interface is not valid! Use 'position', 'velocity' or 'effort' instead..."); return;
+            RCLCPP_ERROR(get_logger(), "Invalid ctrl param! Use 'velocity_ctrl', 'velocity_ctrl_null' or 'vision_ctrl'");
+            return;
+        }
+
+        declare_parameter("ctrl", "velocity_ctrl");
+        get_parameter("ctrl", ctrl_);
+        RCLCPP_INFO(get_logger(),"Selected velocity controller: '%s'", ctrl_.c_str());
+        if (!(ctrl_ == "velocity_ctrl" || ctrl_ == "velocity_ctrl_null" || ctrl_ == "vision_ctrl")) {
+            RCLCPP_ERROR(this->get_logger(), "Invalid ctrl param! Use 'velocity_ctrl', 'velocity_ctrl_null' or 'vision_ctrl'");
+            return;
         }
 
         // Declare end position parameter as array
@@ -136,7 +151,7 @@ class KDLActionServer : public rclcpp::Node
                     desired_commands_[i] = joint_velocities_(i);
                 }
             }
-       else if(cmd_interface_ == "effort"){
+        else if(cmd_interface_ == "effort"){
                 // Create cmd publisher
                 cmdPublisher_ = this->create_publisher<FloatArray>("/effort_controller/commands", 10);
                 
@@ -146,14 +161,24 @@ class KDLActionServer : public rclcpp::Node
                     desired_commands_[i] = joint_efforts_cmd_(i);
                 }
             } 
-
-        this->action_server_ = rclcpp_action::create_server<LinearTrajectory>(
+      if(ctrl_=="velocity_ctrl" || ctrl_ =="velocity_ctrl_null"){
+            this->action_server_ = rclcpp_action::create_server<LinearTrajectory>(
+                this,
+                "linear_trajectory",
+                std::bind(&KDLActionServer::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+                std::bind(&KDLActionServer::handle_cancel, this, std::placeholders::_1),
+                std::bind(&KDLActionServer::handle_accepted, this, std::placeholders::_1)
+            );
+      }
+      else{
+           this->act_server_vision_ = rclcpp_action::create_server<Vision>(
             this,
-            "linear_trajectory",
-            std::bind(&KDLActionServer::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
-            std::bind(&KDLActionServer::handle_cancel, this, std::placeholders::_1),
-            std::bind(&KDLActionServer::handle_accepted, this, std::placeholders::_1)
-        );
+            "vision",
+            std::bind(&KDLActionServer::handle_goal_vision, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&KDLActionServer::handle_cancel_vision, this, std::placeholders::_1),
+            std::bind(&KDLActionServer::handle_accepted_vision, this, std::placeholders::_1)
+           );
+      }
       // Create msg and publish
       std_msgs::msg::Float64MultiArray cmd_msg;
       cmd_msg.data = desired_commands_;
@@ -162,12 +187,16 @@ class KDLActionServer : public rclcpp::Node
       RCLCPP_INFO(this->get_logger(), "Starting trajectory execution ...");
 
       finish_traj= this->create_publisher<std_msgs::msg::Bool> ("/finish_trajectory",10);
-        
+      sub_cPo = this->create_subscription<geometry_msgs::msg::Vector3Stamped>(
+            "/aruco_single/position", 10, std::bind(&KDLActionServer::position_marker, this, std::placeholders::_1));
+      cPo_eigen_ = Eigen::Vector3d::Zero();
+      cPo_received = false;
         
     }
 
  private:
     rclcpp_action::Server<LinearTrajectory>::SharedPtr action_server_;
+    rclcpp_action::Server<Vision>::SharedPtr act_server_vision_;
 
     rclcpp_action::GoalResponse handle_goal(
         const rclcpp_action::GoalUUID &uuid,
@@ -318,8 +347,28 @@ class KDLActionServer : public rclcpp::Node
             }
             else if (cmd_interface_ == "velocity")
             {
-               Vector6d cartvel; cartvel << p_.vel + Kp_*error, o_error;
-               joint_velocities_cmd_.data = pseudoinverse(robot_->getEEJacobian().data)*cartvel; 
+                    RCLCPP_INFO_ONCE(this->get_logger(),
+                     "Velocity control mode active: %s",
+                     ctrl_.c_str());
+                    // Compute differential IK inputs
+                    Vector6d cartvel; 
+                    cartvel << p_.vel + Kp_ * error, o_error;
+
+                    const Eigen::MatrixXd J = robot_->getEEJacobian().data;
+                    const Eigen::VectorXd q = joint_positions_.data;
+
+                    if (ctrl_ == "velocity_ctrl_null")
+                    {
+                        
+                        joint_velocities_cmd_.data =
+                            controller_->velocityCtrlNull(error, J, q);
+                    }
+                    else
+                    {
+                       
+                        joint_velocities_cmd_.data =
+                            pseudoinverse(J) * cartvel;
+                    } 
                 
             }
 
@@ -399,6 +448,161 @@ class KDLActionServer : public rclcpp::Node
 
         
     }
+
+    rclcpp_action::GoalResponse handle_goal_vision(
+        const rclcpp_action::GoalUUID &uuid,
+        std::shared_ptr<const Vision::Goal> goal){
+        
+        RCLCPP_INFO(this->get_logger(), "Received goal request:\n ctrl= %s\n",goal->ctrl.c_str());
+        if (!(goal->ctrl == "vision_ctrl"))
+        {
+            RCLCPP_WARN(get_logger(),"Selected s type is not valid!"); 
+            return rclcpp_action::GoalResponse::REJECT;
+        }
+        (void)uuid;
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+                  
+    }
+    rclcpp_action::CancelResponse handle_cancel_vision(
+        const std::shared_ptr<GoalHandleVision> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Goal canceled");
+        (void) goal_handle;
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
+    void handle_accepted_vision(const std::shared_ptr<GoalHandleVision> goal_handle)
+    {
+        using namespace std::placeholders;
+        // this needs to return quickly to avoid blocking the executor, so spin up a new thread
+        std::thread(&KDLActionServer::execute_vision, this, goal_handle).detach();
+
+    }
+    
+    void execute_vision(const std::shared_ptr<GoalHandleVision> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Starting Vision Control Loop...");
+
+        rclcpp::Rate loop_rate(100); // 100 Hz control loop
+        
+        // Creazione oggetti per Feedback e Result basati sulla definizione .action
+        auto feedback = std::make_shared<Vision::Feedback>();
+        auto result = std::make_shared<Vision::Result>();
+        
+        // --- 1. Definizione delle Trasformate Fisse (Camera Mounting) ---
+        // Basato su iiwa.urdf.xacro:
+        // link_7 -> tool0: z = 0.154
+        // tool0 -> camera_link: z = 0.02, RPY = (0, -1.57, 3.14)
+        // camera_link -> optical_frame: z = 0.02, RPY = (-1.57, 0, -1.57)
+        
+        KDL::Frame T_l7_tool0(KDL::Rotation::Identity(), KDL::Vector(0, 0, 0.154));
+        KDL::Frame T_tool0_cam(KDL::Rotation::RPY(0, -1.5708, 3.14), KDL::Vector(0, 0, 0.02));
+        KDL::Frame T_cam_opt(KDL::Rotation::RPY(-1.5708, 0, -1.5708), KDL::Vector(0, 0, 0.02));
+        
+        // Trasformata Totale: T_ee_optical
+        // Usa questa catena se il tuo robot_->getEEFrame() punta a link_7
+        KDL::Frame T_ee_optical = T_l7_tool0 * T_tool0_cam * T_cam_opt;
+
+        int n_joints = robot_->getNrJnts();
+        Eigen::VectorXd q_dot_cmd(n_joints);
+        q_dot_cmd.setZero();
+
+        // Vettore std::vector per il feedback e l'invio al topic
+        std::vector<double> current_cmd_vec(n_joints, 0.0);
+
+        while (rclcpp::ok())
+        {
+            // --- 2. Gestione Cancellazione ---
+            if (goal_handle->is_canceling()) {
+                // Stop robot
+                std::fill(desired_commands_.begin(), desired_commands_.end(), 0.0);
+                std_msgs::msg::Float64MultiArray cmd_msg;
+                cmd_msg.data = desired_commands_;
+                cmdPublisher_->publish(cmd_msg);
+                
+                // Popola il result con zeri (il robot si è fermato)
+                result->velocity_command = desired_commands_;
+                
+                goal_handle->canceled(result);
+                RCLCPP_INFO(this->get_logger(), "Vision Goal canceled");
+                return;
+            }
+
+            // --- 3. Update Stato Robot ---
+            if(joint_positions_.data.size() > 0) {
+                robot_->update(toStdVector(joint_positions_.data), toStdVector(joint_velocities_.data));
+            }
+
+            // --- 4. Logica di Controllo ---
+            if (!cPo_received) {
+                // Marker non visibile: Stop e Warning
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Marker not visible. Holding position.");
+                q_dot_cmd.setZero();
+            } 
+            else {
+                    // 1. Ottieni i frame correnti
+                    KDL::Frame T_base_ee = robot_->getEEFrame();
+                    KDL::Frame T_base_opt = T_base_ee * T_ee_optical;
+
+                    // 2. Ottieni lo Jacobiano SPAZIALE (riferito alla base)
+                    // Nota: Se getEEJacobian() restituisce s_J_ee_, è riferito alla base ma calcolato nel punto EE
+                    KDL::Jacobian J_cam_kdl = robot_->getEEJacobian();
+
+                    // 3. Sposta il punto di riferimento dello Jacobiano dalla flangia al centro ottico della camera
+                    // Il vettore deve essere espresso nel frame di riferimento dello Jacobiano (base)
+                    KDL::Vector offset_optical = T_base_ee.M * T_ee_optical.p;
+                    J_cam_kdl.changeRefPoint(offset_optical); 
+
+                    // 4. Ruota lo Jacobiano nel frame Optical
+                    // Questo è fondamentale: L(s) lavora in frame camera, quindi anche J deve essere in frame camera
+                    J_cam_kdl.changeBase(T_base_opt.M.Inverse()); 
+
+                    // 5. Estrai i dati per il controller
+                    Eigen::MatrixXd J_c = J_cam_kdl.data;
+                    Eigen::Vector3d p_o = cPo_eigen_; // Posizione marker già in frame ottico
+                    Eigen::Matrix3d R_base_cam = toEigen(T_base_opt.M);
+
+                    // 6. Calcolo velocità tramite controller
+                    q_dot_cmd = controller_->visionCtrl(p_o, J_c, R_base_cam, joint_positions_.data);
+            }
+
+            // --- 5. Preparazione Dati (Eigen -> std::vector) ---
+            // Copiamo i dati da Eigen::VectorXd al std::vector
+            for(int i=0; i<n_joints; ++i){
+                current_cmd_vec[i] = q_dot_cmd(i);
+            }
+
+            // --- 6. Pubblicazione Feedback ---
+            // Ora inviamo le velocità calcolate come richiesto dal file .action
+            feedback->velocity_command_f = current_cmd_vec;
+            goal_handle->publish_feedback(feedback);
+
+            // --- 7. Invio Comandi al Robot ---
+            if (cmd_interface_ == "velocity") {
+                // Aggiorna il membro di classe desired_commands_ per il publisher
+                desired_commands_ = current_cmd_vec;
+                
+                std_msgs::msg::Float64MultiArray cmd_msg;
+                cmd_msg.data = desired_commands_;
+                cmdPublisher_->publish(cmd_msg);
+            } 
+            else {
+                RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 5000, 
+                    "Vision control requires 'velocity' command interface!");
+            }
+
+            loop_rate.sleep();
+        }
+
+        // --- 8. Termine (Successo) ---
+        // Se il loop termina normalmente (es. rclcpp::shutdown), restituisci l'ultimo comando
+        result->velocity_command = current_cmd_vec;
+        goal_handle->succeed(result);
+        RCLCPP_INFO(this->get_logger(), "Vision Goal succeeded");
+    }
+
+
+
+
     void joint_state_subscriber(const sensor_msgs::msg::JointState& sensor_msg){
 
         joint_state_available_ = true;
@@ -407,14 +611,34 @@ class KDLActionServer : public rclcpp::Node
             joint_velocities_.data[i] = sensor_msg.velocity[i];
         }
     }
+    void position_marker(const geometry_msgs::msg::Vector3Stamped::SharedPtr pos_msg) {
+        // Caricamento dei dati in Eigen
+        cPo_eigen_ << pos_msg->vector.x, pos_msg->vector.y, pos_msg->vector.z;
+        cPo_received = true;
+
+        // Calcolo della distanza (norma) per debug
+        double dist = cPo_eigen_.norm();
+
+        // Stampa a terminale
+        RCLCPP_INFO(this->get_logger(), 
+            "--- Marker ArUco rilevato --- \n"
+            "Posizione (Frame Ottico): X: %.3f, Y: %.3f, Z: %.3f \n"
+            "Distanza Totale: %.3f metri",
+            cPo_eigen_.x(), cPo_eigen_.y(), cPo_eigen_.z(), dist);
+    }
     double traj_duration_;
     double acc_duration_;
     double total_time_;
     int trajectory_len_;
     double Kp_;
+    std::string ctrl_;
+    Eigen::Vector3d sd_{0.0, 0.0, 1.0};
     Eigen::Vector3d end_position_;
     ros2_kdl_package::msg::PositionError errpos_f;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr finish_traj;
+    rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr sub_cPo;
+    Eigen::Vector3d cPo_eigen_;
+    bool cPo_received;
 
     std::shared_ptr<KDLController> controller_;
 
