@@ -2,36 +2,38 @@
 
 
 
-This package  is supposed to be used together with the [ros2_iiwa package](https://github.com/RoboticsLab2025/ros2_iiwa) 
+This package  is supposed to be used together with the [ros2_iiwa package](https://github.com/RoboticsLab2025/ros2_iiwa) and [aruco_ros](https://github.com/pal-robotics/aruco_ros)
+Use repository Dockerfile 
 
-
-Clone this package in the `src` folder of your ROS 2 workspace together ros2_iiwa.
+Clone this package in the `src` folder of your ROS 2 workspace together ros2_iiwa and aruco_ros.
 ```
-git clone -b 1c --single-branch https://github.com/emanudevito14/ros2_kdl_package.git
+git clone -b vision --single-branch https://github.com/emanudevito14/ros2_kdl_package.git
 ```
-Build your new package
+In the terminal 
 ```
 colcon build 
-```
-Source the setup files
-```
 source install/setup.bash
-```
-launch this
-```
-ros2 launch iiwa_bringup iiwa.launch.py command_interface:="velocity" robot_controller:="velocity_controller"
+ros2 launch iiwa_bringup iiwa.launch.py command_interface:="velocity" robot_controller:="velocity_controller" use_sim:="true"
+
 
 ```
 Open new terminal and run
 ```
-ros2 run ros2_kdl_package kdl_action_server_node --ros-args -p cmd_interface:=velocity
+ros2 launch aruco_ros single.launch.py eye:=right marker_id:=14 marker_size:=0.15
+
 
 ```
 Open new terminal and run
 ```
-ros2 run ros2_kdl_package kdl_action_client_node --ros-args --params-file src/ros2_kdl_package/config/waypoint.yaml
-
+ros2 run ros2_kdl_package aruco_setpose_client
 
 ```
+Open new terminal and run
+```
+ros2 launch ros2_kdl_package kdl_action.launch.py 
+
+```
+
+Move arrow up,down , left ,right and U,D to move Aruco and R,T,F,G,H,J to rotate Aruco
 
 
