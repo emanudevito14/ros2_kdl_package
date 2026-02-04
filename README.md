@@ -1,7 +1,7 @@
 # ros2_kdl_package
 
 
-This package is supposed to be used together with the [ros2_iiwa package](https://github.com/RoboticsLab2025/ros2_iiwa) 
+This package is supposed to be used together with the [ros2_iiwa package](https://github.com/emanudevito14/iiwa_ros2) 
 
 
 Clone this package in the `src` folder of your ROS 2 workspace and put [ros2_iiwa package](https://github.com/RoboticsLab2025/ros2_iiwa) in `src`  .
@@ -20,6 +20,8 @@ Source the setup files
 
 Run the node
 ```
+export IGN_GAZEBO_MODEL_PATH=$IGN_GAZEBO_MODEL_PATH:/home/user/ros2_ws/install/iiwa_description/share/iiwa_description/gazebo/models
+export IGN_GAZEBO_RESOURCE_PATH=$IGN_GAZEBO_RESOURCE_PATH:/home/user/ros2_ws/install/iiwa_description/share/iiwa_description/gazebo/models:/home/user/ros2_ws/install/iiwa_description/share/iiwa_description/gazebo/worlds
 ros2 launch iiwa_bringup iiwa.launch.py command_interface:="velocity" robot_controller:="velocity_controller"
 ```
 Open new terminal and launch
