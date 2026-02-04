@@ -1,7 +1,8 @@
 # ros2_kdl_package
 
 
-# Use repository Dockerfile 
+Use this file from this repository
+ 
 This package  is supposed to be used together with the [ros2_iiwa package](https://github.com/emanudevito14/iiwa_ros2) and [aruco_ros](https://github.com/pal-robotics/aruco_ros)
 
 
