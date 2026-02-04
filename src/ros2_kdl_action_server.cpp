@@ -482,44 +482,39 @@ class KDLActionServer : public rclcpp::Node
     {
         RCLCPP_INFO(this->get_logger(), "Starting Vision Control Loop...");
 
-        rclcpp::Rate loop_rate(100); // 100 Hz control loop
+        rclcpp::Rate loop_rate(100); 
         
-        // Creazione oggetti per Feedback e Result basati sulla definizione .action
+        
         auto feedback = std::make_shared<Vision::Feedback>();
         auto result = std::make_shared<Vision::Result>();
         
-        // --- 1. Definizione delle Trasformate Fisse (Camera Mounting) ---
-        // Basato su iiwa.urdf.xacro:
-        // link_7 -> tool0: z = 0.154
-        // tool0 -> camera_link: z = 0.02, RPY = (0, -1.57, 3.14)
-        // camera_link -> optical_frame: z = 0.02, RPY = (-1.57, 0, -1.57)
+       
         
         KDL::Frame T_l7_tool0(KDL::Rotation::Identity(), KDL::Vector(0, 0, 0.154));
         KDL::Frame T_tool0_cam(KDL::Rotation::RPY(0, -1.5708, 3.14), KDL::Vector(0, 0, 0.02));
         KDL::Frame T_cam_opt(KDL::Rotation::RPY(-1.5708, 0, -1.5708), KDL::Vector(0, 0, 0.02));
         
-        // Trasformata Totale: T_ee_optical
-        // Usa questa catena se il tuo robot_->getEEFrame() punta a link_7
+        
         KDL::Frame T_ee_optical = T_l7_tool0 * T_tool0_cam * T_cam_opt;
 
         int n_joints = robot_->getNrJnts();
         Eigen::VectorXd q_dot_cmd(n_joints);
         q_dot_cmd.setZero();
 
-        // Vettore std::vector per il feedback e l'invio al topic
+        
         std::vector<double> current_cmd_vec(n_joints, 0.0);
 
         while (rclcpp::ok())
         {
-            // --- 2. Gestione Cancellazione ---
+            
             if (goal_handle->is_canceling()) {
-                // Stop robot
+                
                 std::fill(desired_commands_.begin(), desired_commands_.end(), 0.0);
                 std_msgs::msg::Float64MultiArray cmd_msg;
                 cmd_msg.data = desired_commands_;
                 cmdPublisher_->publish(cmd_msg);
                 
-                // Popola il result con zeri (il robot si è fermato)
+                
                 result->velocity_command = desired_commands_;
                 
                 goal_handle->canceled(result);
@@ -527,58 +522,53 @@ class KDLActionServer : public rclcpp::Node
                 return;
             }
 
-            // --- 3. Update Stato Robot ---
+            
             if(joint_positions_.data.size() > 0) {
                 robot_->update(toStdVector(joint_positions_.data), toStdVector(joint_velocities_.data));
             }
 
-            // --- 4. Logica di Controllo ---
+            
             if (!cPo_received) {
-                // Marker non visibile: Stop e Warning
+                
                 RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "Marker not visible. Holding position.");
                 q_dot_cmd.setZero();
             } 
             else {
-                    // 1. Ottieni i frame correnti
+                    
                     KDL::Frame T_base_ee = robot_->getEEFrame();
                     KDL::Frame T_base_opt = T_base_ee * T_ee_optical;
 
-                    // 2. Ottieni lo Jacobiano SPAZIALE (riferito alla base)
-                    // Nota: Se getEEJacobian() restituisce s_J_ee_, è riferito alla base ma calcolato nel punto EE
+                    
                     KDL::Jacobian J_cam_kdl = robot_->getEEJacobian();
 
-                    // 3. Sposta il punto di riferimento dello Jacobiano dalla flangia al centro ottico della camera
-                    // Il vettore deve essere espresso nel frame di riferimento dello Jacobiano (base)
+                    
                     KDL::Vector offset_optical = T_base_ee.M * T_ee_optical.p;
                     J_cam_kdl.changeRefPoint(offset_optical); 
 
-                    // 4. Ruota lo Jacobiano nel frame Optical
-                    // Questo è fondamentale: L(s) lavora in frame camera, quindi anche J deve essere in frame camera
+                    
                     J_cam_kdl.changeBase(T_base_opt.M.Inverse()); 
 
-                    // 5. Estrai i dati per il controller
+                    
                     Eigen::MatrixXd J_c = J_cam_kdl.data;
                     Eigen::Vector3d p_o = cPo_eigen_; // Posizione marker già in frame ottico
                     Eigen::Matrix3d R_base_cam = toEigen(T_base_opt.M);
 
-                    // 6. Calcolo velocità tramite controller
+                   
                     q_dot_cmd = controller_->visionCtrl(p_o, J_c, R_base_cam, joint_positions_.data);
             }
 
-            // --- 5. Preparazione Dati (Eigen -> std::vector) ---
-            // Copiamo i dati da Eigen::VectorXd al std::vector
+            
             for(int i=0; i<n_joints; ++i){
                 current_cmd_vec[i] = q_dot_cmd(i);
             }
 
-            // --- 6. Pubblicazione Feedback ---
-            // Ora inviamo le velocità calcolate come richiesto dal file .action
+            
             feedback->velocity_command_f = current_cmd_vec;
             goal_handle->publish_feedback(feedback);
 
-            // --- 7. Invio Comandi al Robot ---
+            
             if (cmd_interface_ == "velocity") {
-                // Aggiorna il membro di classe desired_commands_ per il publisher
+               
                 desired_commands_ = current_cmd_vec;
                 
                 std_msgs::msg::Float64MultiArray cmd_msg;
@@ -593,8 +583,7 @@ class KDLActionServer : public rclcpp::Node
             loop_rate.sleep();
         }
 
-        // --- 8. Termine (Successo) ---
-        // Se il loop termina normalmente (es. rclcpp::shutdown), restituisci l'ultimo comando
+       
         result->velocity_command = current_cmd_vec;
         goal_handle->succeed(result);
         RCLCPP_INFO(this->get_logger(), "Vision Goal succeeded");
