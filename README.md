@@ -40,4 +40,11 @@ ros2 launch ros2_kdl_package kdl_action.launch.py
 
 Move arrow up,down , left ,right and U,D to move Aruco and R,T,F,G,H,J to rotate Aruco
 
+Open new terminal and run
+```
+ros2 run rqt_plot rqt_plot
+
+```
+To analyze the velocity command of the i-th joint, select /velocity_controller/commands/data[i]
+
 
